@@ -1,0 +1,1015 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FileWatch</title>
+<meta name="description" content="Como o FileWatch detecta comportamento de ransomware: entropia, baseline, janela deslizante e um laboratório local seguro.">
+<meta name="author" content="Gabriel Moreno Serignolli">
+<meta property="og:type" content="website">
+<meta property="og:title" content="FileWatch: detecção comportamental de ransomware">
+<meta property="og:description" content="Monitor de arquivos em Java + Spring Boot que mede volume, entropia e nomes para detectar ransomware. Com simulador benigno e laboratório seguro.">
+<meta property="og:url" content="https://serignolli.github.io/filewatch/">
+<meta name="theme-color" content="#a85f00">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%276%27 fill=%27%23a85f00%27/%3E%3Cpath d=%27M9 6h10l5 5v15H9z%27 fill=%27%23fff%27/%3E%3Cpath d=%27M12 21l3-6 3 4 2-3%27 stroke=%27%23a85f00%27 stroke-width=%272%27 fill=%27none%27/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,500..800&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: caderno de laboratório — índice fixo à esquerda, coluna de leitura de ~68ch, instrumentos (entropia, detector) como bancadas interativas */
+:root {
+  --paper: #f2f4f6;
+  --surface: #ffffff;
+  --ink: #15202a;
+  --muted: #566573;
+  --line: #d3dae1;
+  --code-bg: #e7ebef;
+  --accent: #a85f00;
+  --accent-soft: #f5e6cc;
+  --ok: #2d7a4c;
+  --warning: #a86200;
+  --high: #bf3328;
+  --hist: #3d5a73;
+  --f-display: "Archivo", "Arial Narrow", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --step--1: 0.86rem;
+  --step-0: 1.02rem;
+  --step-1: 1.25rem;
+  --step-2: 1.6rem;
+  --step-3: 2.2rem;
+  --step-4: clamp(2.6rem, 7vw, 4.4rem);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0e151c; --surface: #141e28; --ink: #dce4eb; --muted: #93a2af; --line: #263441;
+    --code-bg: #0a1117; --accent: #f0a53c; --accent-soft: #3a2911; --ok: #5cc08a; --warning: #eaa33c;
+    --high: #f26b5f; --hist: #8fb3d1; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0e151c; --surface: #141e28; --ink: #dce4eb; --muted: #93a2af; --line: #263441;
+  --code-bg: #0a1117; --accent: #f0a53c; --accent-soft: #3a2911; --ok: #5cc08a; --warning: #eaa33c;
+  --high: #f26b5f; --hist: #8fb3d1; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  background: var(--paper); color: var(--ink);
+  font-family: var(--f-body); font-size: var(--step-0); line-height: 1.65;
+  margin: 0; padding-inline: 16px; padding-block: 0 64px;
+}
+a { color: var(--accent); text-underline-offset: 3px; }
+a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+code, pre, kbd { font-family: var(--f-mono); font-size: 0.9em; }
+:not(pre) > code { background: var(--code-bg); padding: 0.08em 0.35em; border-radius: 4px; }
+h1, h2, h3 { font-family: var(--f-display); line-height: 1.15; text-wrap: balance; margin: 0; }
+h2 { font-size: var(--step-3); font-variation-settings: "wdth" 112; font-weight: 750; letter-spacing: -0.01em; }
+h3 { font-size: var(--step-1); font-weight: 700; font-variation-settings: "wdth" 106; }
+p { margin: 0; }
+
+.shell { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 56px; }
+@media (max-width: 900px) { .shell { grid-template-columns: minmax(0, 1fr); gap: 0; } .toc { display: none; } }
+
+.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; padding-top: 40px; font-size: var(--step--1); }
+.toc strong { font-family: var(--f-display); font-size: 1.05rem; display: block; margin-bottom: 12px; }
+.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; border-left: 1px solid var(--line); }
+.toc a { color: var(--muted); text-decoration: none; display: block; padding: 3px 0 3px 12px; margin-left: -1px; border-left: 2px solid transparent; }
+.toc a:hover { color: var(--ink); border-left-color: var(--accent); }
+
+main { min-width: 0; display: grid; gap: 72px; }
+section { display: grid; gap: 18px; scroll-margin-top: 24px; }
+.prose { max-width: 68ch; display: grid; gap: 14px; }
+.eyebrow { font-family: var(--f-mono); font-size: 0.74rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+.muted { color: var(--muted); }
+ul.list { margin: 0; padding-left: 1.2em; display: grid; gap: 6px; }
+
+/* Hero */
+.hero { padding-top: 44px; display: grid; gap: 22px; }
+.hero h1 { font-size: var(--step-4); font-variation-settings: "wdth" 125; font-weight: 800; letter-spacing: -0.02em; }
+.hero .thesis { font-size: var(--step-2); font-family: var(--f-display); font-variation-settings: "wdth" 100; font-weight: 500; max-width: 26ch; line-height: 1.25; }
+.hero .lede { max-width: 64ch; color: var(--muted); }
+.disclaimer { font-size: var(--step--1); color: var(--muted); border-left: 2px solid var(--line); padding-left: 12px; max-width: 64ch; }
+
+.term { background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.term-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); font-family: var(--f-mono); font-size: 0.75rem; color: var(--muted); }
+.term pre { margin: 0; padding: 14px 16px; overflow-x: auto; font-size: 0.82rem; line-height: 1.6; white-space: pre; }
+.t-ok { color: var(--ok); font-weight: 600; } .t-high { color: var(--high); font-weight: 600; } .t-acc { color: var(--accent); } .t-dim { color: var(--muted); }
+.copy { font: inherit; font-size: 0.72rem; background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 5px; padding: 2px 8px; cursor: pointer; }
+.copy:hover { color: var(--ink); border-color: var(--muted); }
+
+.cmds { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+
+/* Tabelas */
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.93rem; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-family: var(--f-mono); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+td.num { font-variant-numeric: tabular-nums; font-family: var(--f-mono); white-space: nowrap; }
+
+/* Diagrama */
+.diagram { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 16px; }
+.diagram svg { display: block; min-width: 760px; width: 100%; height: auto; }
+.diagram text { font-family: var(--f-body); fill: var(--ink); }
+.diagram .mono { font-family: var(--f-mono); fill: var(--muted); font-size: 11px; }
+.diagram .box { fill: var(--paper); stroke: var(--line); stroke-width: 1.5; }
+.diagram .box.alert { stroke: var(--high); }
+.diagram .arrow { stroke: var(--accent); stroke-width: 1.8; fill: none; }
+.diagram .ev { fill: var(--accent); font-family: var(--f-mono); font-size: 10.5px; }
+.diagram .head { fill: var(--accent); }
+
+.steps { display: grid; gap: 12px; counter-reset: s; max-width: 72ch; }
+.steps li { list-style: none; display: grid; grid-template-columns: 2rem minmax(0, 1fr); gap: 8px; }
+.steps li::before { counter-increment: s; content: counter(s); font-family: var(--f-mono); color: var(--accent); font-weight: 600; }
+.steps { padding: 0; margin: 0; }
+
+/* Bancadas interativas */
+.bench { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 20px; display: grid; gap: 16px; }
+.bench-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px 16px; }
+.bench-head h3 { font-size: var(--step-1); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { font: inherit; font-size: 0.86rem; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); cursor: pointer; }
+.chip:hover { border-color: var(--muted); }
+.chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); font-weight: 600; }
+textarea { width: 100%; min-height: 110px; resize: vertical; font-family: var(--f-mono); font-size: 0.82rem; background: var(--paper); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 10px; }
+.readout { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.readout div { display: grid; gap: 2px; }
+.readout .k { font-family: var(--f-mono); font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.readout .v { font-family: var(--f-display); font-size: var(--step-2); font-weight: 700; font-variant-numeric: tabular-nums; }
+.gauge { position: relative; height: 14px; border-radius: 7px; background: var(--code-bg); border: 1px solid var(--line); }
+.gauge .fill { position: absolute; inset: 0 auto 0 0; border-radius: 7px; background: var(--hist); transition: width .25s; }
+.gauge .fill.hot { background: var(--high); }
+.gauge .mark { position: absolute; top: -5px; bottom: -5px; width: 2px; background: var(--high); left: calc(7.5 / 8 * 100%); }
+.gauge-scale { display: flex; justify-content: space-between; font-family: var(--f-mono); font-size: 0.7rem; color: var(--muted); }
+canvas.hist { width: 100%; height: 120px; display: block; background: var(--paper); border: 1px solid var(--line); border-radius: 6px; }
+
+.controls { display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: center; font-size: 0.9rem; }
+.controls label { display: flex; align-items: center; gap: 10px; }
+.controls input[type="range"] { accent-color: var(--accent); width: 140px; }
+.controls output { font-family: var(--f-mono); min-width: 2ch; }
+.strip { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); }
+.strip svg { display: block; min-width: 640px; width: 100%; height: auto; }
+.strip text { font-family: var(--f-mono); font-size: 10px; fill: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.8rem; color: var(--muted); }
+.legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: 0; background: var(--c); }
+.alerts { display: grid; gap: 8px; }
+.alert-row { display: grid; grid-template-columns: 64px 86px minmax(0, 1fr); gap: 10px; align-items: baseline; font-size: 0.9rem; padding: 8px 10px; border-radius: 6px; background: var(--paper); border: 1px solid var(--line); }
+.alert-row .t { font-family: var(--f-mono); font-variant-numeric: tabular-nums; color: var(--muted); font-size: 0.82rem; }
+.pill { font-family: var(--f-mono); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; padding: 2px 8px; border-radius: 999px; justify-self: start; border: 1px solid currentColor; }
+.pill.HIGH { color: var(--high); } .pill.WARNING { color: var(--warning); } .pill.MUTED { color: var(--muted); }
+.verdict { font-size: 0.95rem; padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--paper); border-radius: 0 6px 6px 0; }
+@media (max-width: 520px) { .alert-row { grid-template-columns: 56px minmax(0, 1fr); } .alert-row .reasons { grid-column: 1 / -1; } }
+
+.signals { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+.signal { border-top: 2px solid var(--accent); padding-top: 10px; display: grid; gap: 6px; align-content: start; }
+.signal .code { font-family: var(--f-mono); font-size: 0.78rem; color: var(--accent); }
+
+.formula { font-family: var(--f-mono); background: var(--code-bg); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font-size: 0.95rem; }
+
+.refs { display: grid; gap: 10px; max-width: 72ch; padding: 0; margin: 0; list-style: none; }
+.refs li { display: grid; gap: 2px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.refs .src { font-size: 0.85rem; color: var(--muted); }
+dl.gloss { display: grid; grid-template-columns: minmax(120px, 190px) minmax(0, 1fr); gap: 10px 20px; margin: 0; max-width: 80ch; }
+dl.gloss dt { font-family: var(--f-mono); font-size: 0.86rem; color: var(--accent); }
+dl.gloss dd { margin: 0; }
+@media (max-width: 560px) { dl.gloss { grid-template-columns: minmax(0, 1fr); gap: 2px; } dl.gloss dd { margin-bottom: 10px; } }
+
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px 18px; display: grid; gap: 8px; align-content: start; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.btn { display: inline-flex; align-items: center; gap: 8px; font-family: var(--f-body); font-size: 0.92rem; font-weight: 600; padding: 9px 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); text-decoration: none; cursor: pointer; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--paper); }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn svg { width: 16px; height: 16px; fill: currentColor; }
+
+/* Anatomia do ataque simulado */
+.anatomy { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.stage { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: grid; gap: 8px; align-content: start; transition: border-color .3s, box-shadow .3s, opacity .3s; }
+.stage .n { font-family: var(--f-mono); font-size: 0.72rem; color: var(--muted); letter-spacing: 0.08em; }
+.stage h4 { margin: 0; font-family: var(--f-display); font-size: 1rem; font-weight: 700; }
+.stage p { font-size: 0.85rem; color: var(--muted); }
+.stage .fname { font-family: var(--f-mono); font-size: 0.76rem; background: var(--surface); border: 1px solid var(--line); border-radius: 5px; padding: 4px 6px; overflow-wrap: anywhere; }
+.stage .ebar { height: 6px; border-radius: 3px; background: var(--code-bg); overflow: hidden; }
+.stage .ebar i { display: block; height: 100%; background: var(--hist); }
+.stage .ebar i.hot { background: var(--high); }
+.stage .sigs { display: flex; flex-wrap: wrap; gap: 4px; min-height: 22px; }
+.sig { font-family: var(--f-mono); font-size: 0.7rem; font-weight: 600; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--accent); color: var(--accent); }
+.anatomy.playing .stage { opacity: 0.45; }
+.anatomy.playing .stage.active, .anatomy.playing .stage.done { opacity: 1; }
+.stage.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.replay-log { min-height: 9.6em; }
+.replay-log .line { display: block; }
+.t-warn { color: var(--warning); font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { .stage { transition: none; } }
+
+footer { max-width: 1120px; margin: 72px auto 0; color: var(--muted); font-size: var(--step--1); border-top: 1px solid var(--line); padding-top: 18px; }
+</style>
+
+</head>
+<body>
+<div class="shell">
+  <nav class="toc" aria-label="Seções">
+    <strong>FileWatch</strong>
+    <ol>
+      <li><a href="#testar">Testar agora</a></li>
+      <li><a href="#porque">Por que existe</a></li>
+      <li><a href="#arquitetura">Como funciona</a></li>
+      <li><a href="#entropia">Entropia de Shannon</a></li>
+      <li><a href="#baseline">Baseline e hash</a></li>
+      <li><a href="#detector">O detector</a></li>
+      <li><a href="#simular">Simular passo a passo</a></li>
+      <li><a href="#watcher">Armadilhas do WatchService</a></li>
+      <li><a href="#seguranca">Segurança do laboratório</a></li>
+      <li><a href="#ambiente">Ambiente controlado</a></li>
+      <li><a href="#limites">Limitações</a></li>
+      <li><a href="#estudar">Para estudar</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <header class="hero">
+      <span class="eyebrow">Monitor de integridade · detecção comportamental</span>
+      <h1>FileWatch</h1>
+      <p class="thesis">Ransomware muda seus arquivos de um jeito que dá para medir.</p>
+      <p class="lede">Um projeto de estudo em Java 17 + Spring Boot que observa uma única pasta, recalcula hash e entropia só do arquivo que mudou e decide, numa janela de 10 segundos, se o padrão das mudanças tem cara de ataque. Acompanha um simulador benigno para você provocar o alerta na sua própria máquina, sem risco.</p>
+      <div class="term" role="figure" aria-label="Saída real do comando lab demo">
+        <div class="term-bar"><span>saída real de <code>lab demo</code></span></div>
+<pre><span class="t-acc">==&gt;</span> Monitor pronto. Rodando o simulador benigno
+[1/4] 40 vítimas criadas. Aguardando 5s para o baseline...
+[2/4] Conteúdo sobrescrito com bytes aleatórios.
+[3/4] Arquivos renomeados para .encrypted.
+[4/4] Nota de resgate fake criada. Fim.
+
+<span class="t-ok">==&gt; PASSOU: alerta HIGH detectado</span>
+    - S1 modificação em massa: 40 arquivos alterados em 10s (limiar 30)
+    - S2 salto de entropia: 10 arquivos foram para &gt;= 7,5 bits/byte (+2,0 ou mais) em 10s (limiar 10)</pre>
+      </div>
+      <div class="actions">
+        <a class="btn primary" href="#testar">Testar agora</a>
+        <a class="btn" href="https://github.com/serignolli/filewatch"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>Código no GitHub</a>
+        <a class="btn" href="#simular">Ver o ataque simulado</a>
+      </div>
+      <p class="disclaimer"><strong>Pesquisa e estudo de 2026.</strong> Técnicas de ransomware, defesas, referências e versões (Java 17, Spring Boot 3.5) refletem esse ano; se estiver lendo bem depois, confira o que mudou.</p>
+      <p class="disclaimer">Projeto de portfólio. Não é antivírus, não tem driver de kernel e não substitui um EDR nem backup. A defesa que de fato recupera seus dados continua sendo backup offline e versionado.</p>
+    </header>
+
+    <section id="testar">
+      <span class="eyebrow">Testar agora</span>
+      <h2>Um comando, tudo dentro da pasta do projeto</h2>
+      <div class="prose">
+        <p>Precisa de Java 17+ e Maven 3.9+ no <code>PATH</code>. Não pede administrador, não abre rede e não mexe em nada fora de <code>./sandbox</code>. Primeiro, baixe o código (ou use <em>Code → Download ZIP</em> no GitHub):</p>
+      </div>
+      <div class="term">
+        <div class="term-bar"><span>obter o código</span><button class="copy" type="button" data-copy="git clone https://github.com/serignolli/filewatch.git&#10;cd filewatch">Copiar</button></div>
+        <pre>git clone https://github.com/serignolli/filewatch.git
+cd filewatch</pre>
+      </div>
+      <div class="prose">
+        <p>Depois, um comando. O <code>demo</code> compila, limpa execuções anteriores, sobe o monitor em segundo plano, roda o simulador e confere se o alerta <code>HIGH</code> saiu. Leva cerca de um minuto na primeira vez, por causa do download das dependências do Maven.</p>
+      </div>
+      <div class="cmds">
+        <div class="term">
+          <div class="term-bar"><span>Windows (cmd ou PowerShell)</span><button class="copy" type="button" data-copy=".\lab.cmd demo">Copiar</button></div>
+          <pre>.\lab.cmd demo</pre>
+        </div>
+        <div class="term">
+          <div class="term-bar"><span>Linux · macOS · Git Bash</span><button class="copy" type="button" data-copy="./lab.sh demo">Copiar</button></div>
+          <pre>./lab.sh demo</pre>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Comando</th><th>O que faz</th></tr></thead>
+          <tbody>
+            <tr><td><code>check</code></td><td>Confere Java, Maven e o marcador do sandbox.</td></tr>
+            <tr><td><code>test</code></td><td>Roda os 33 testes unitários. Eles usam pastas temporárias e não sobem o Spring.</td></tr>
+            <tr><td><code>demo</code></td><td>Teste de ponta a ponta com o jar real. Imprime PASSOU ou FALHOU.</td></tr>
+            <tr><td><code>monitor</code></td><td>Sobe só o monitor em primeiro plano, para você acompanhar o log.</td></tr>
+            <tr><td><code>attack</code></td><td>Roda só o simulador. Use com o <code>monitor</code> aberto em outro terminal.</td></tr>
+            <tr><td><code>clean</code></td><td>Apaga só as pastas que o simulador gerou.</td></tr>
+            <tr><td><code>reset</code></td><td><code>clean</code> + apaga <code>baseline.json</code> e <code>alerts.log</code>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="porque">
+      <span class="eyebrow">Por que existe</span>
+      <h2>Assinaturas chegam tarde. Comportamento, não.</h2>
+      <div class="prose">
+        <p>Um antivírus tradicional reconhece malware por assinatura: um hash ou um padrão de bytes já catalogado. Isso funciona para o que já foi visto. Uma variante nova de ransomware, recompilada ou ofuscada, passa sem assinatura nenhuma.</p>
+        <p>Só que todo ransomware de criptografia precisa fazer a mesma coisa para cumprir o objetivo: abrir muitos arquivos do usuário, trocar o conteúdo por dados cifrados, em geral renomear e deixar uma nota pedindo pagamento. No catálogo MITRE ATT&amp;CK isso é a técnica <em>T1486, Data Encrypted for Impact</em>. Esse comportamento deixa rastros mensuráveis, qualquer que seja o código:</p>
+        <ul class="list">
+          <li><strong>Volume:</strong> dezenas de arquivos alterados em segundos, coisa que uma pessoa editando documentos não faz.</li>
+          <li><strong>Aleatoriedade:</strong> dado cifrado é indistinguível de ruído. A entropia do arquivo salta para perto de 8 bits por byte.</li>
+          <li><strong>Nomes:</strong> extensões como <code>.locked</code> e <code>.encrypted</code> e arquivos como <code>README_DECRYPT.txt</code>.</li>
+        </ul>
+        <p>O FileWatch mede exatamente esses três rastros. É a mesma ideia de ferramentas acadêmicas como CryptoLock, UNVEIL e ShieldFS (referências no fim), em versão pequena o bastante para ler o código inteiro numa tarde.</p>
+        <p>O objetivo é didático: praticar I/O de arquivos, hashing por streaming, entropia, eventos e processamento assíncrono no Spring, com uma narrativa de segurança que dá para demonstrar ao vivo.</p>
+      </div>
+    </section>
+
+    <section id="arquitetura">
+      <span class="eyebrow">Como funciona</span>
+      <h2>Quatro peças que só conversam por eventos</h2>
+      <div class="prose">
+        <p>Cada peça publica um evento no <code>ApplicationEventPublisher</code> do Spring e não sabe quem vai consumir. Isso deixa cada uma testável sozinha e permite trocar o alerta (log hoje, dashboard amanhã) sem tocar no detector.</p>
+      </div>
+      <div class="diagram" role="img" aria-label="Fluxo: FolderWatcher publica FileChangedEvent para FileAnalyzer, que publica FileAnalyzedEvent para RansomwareDetector, que publica RansomwareSuspectedEvent para AlertListener">
+        <svg viewBox="0 0 900 170" xmlns="http://www.w3.org/2000/svg">
+          <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+          <rect class="box" x="4" y="40" width="170" height="92" rx="8"/>
+          <text x="89" y="70" text-anchor="middle" font-weight="600" font-size="15">FolderWatcher</text>
+          <text class="mono" x="89" y="92" text-anchor="middle">WatchService</text>
+          <text class="mono" x="89" y="108" text-anchor="middle">debounce 300 ms</text>
+          <text class="mono" x="89" y="124" text-anchor="middle">thread folder-watcher</text>
+
+          <rect class="box" x="246" y="40" width="170" height="92" rx="8"/>
+          <text x="331" y="70" text-anchor="middle" font-weight="600" font-size="15">FileAnalyzer</text>
+          <text class="mono" x="331" y="92" text-anchor="middle">SHA-256 + entropia</text>
+          <text class="mono" x="331" y="108" text-anchor="middle">compara com baseline</text>
+          <text class="mono" x="331" y="124" text-anchor="middle">@Async · pool analyzer-*</text>
+
+          <rect class="box" x="488" y="40" width="186" height="92" rx="8"/>
+          <text x="581" y="70" text-anchor="middle" font-weight="600" font-size="15">RansomwareDetector</text>
+          <text class="mono" x="581" y="92" text-anchor="middle">janela deslizante 10 s</text>
+          <text class="mono" x="581" y="108" text-anchor="middle">sinais S1–S4</text>
+          <text class="mono" x="581" y="124" text-anchor="middle">cooldown 30 s</text>
+
+          <rect class="box alert" x="746" y="40" width="150" height="92" rx="8"/>
+          <text x="821" y="70" text-anchor="middle" font-weight="600" font-size="15">AlertListener</text>
+          <text class="mono" x="821" y="92" text-anchor="middle">log WARN / ERROR</text>
+          <text class="mono" x="821" y="108" text-anchor="middle">alerts.log (JSON)</text>
+
+          <path class="arrow" d="M176,86 H242" marker-end="url(#ah)"/>
+          <path class="arrow" d="M418,86 H484" marker-end="url(#ah)"/>
+          <path class="arrow" d="M676,86 H742" marker-end="url(#ah)"/>
+          <text class="ev" x="209" y="24" text-anchor="middle">FileChanged</text>
+          <text class="ev" x="209" y="36" text-anchor="middle">Event</text>
+          <text class="ev" x="451" y="24" text-anchor="middle">FileAnalyzed</text>
+          <text class="ev" x="451" y="36" text-anchor="middle">Event</text>
+          <text class="ev" x="709" y="24" text-anchor="middle">Ransomware</text>
+          <text class="ev" x="709" y="36" text-anchor="middle">SuspectedEvent</text>
+          <text class="mono" x="450" y="162" text-anchor="middle">o watcher nunca espera por hash: só anota o evento e segue ouvindo o sistema de arquivos</text>
+        </svg>
+      </div>
+      <ol class="steps">
+        <li><div><strong>FolderWatcher</strong> registra a pasta e todas as subpastas (o <code>WatchService</code> do Java não é recursivo). Junta rajadas de eventos do mesmo arquivo por 300 ms e publica um <code>FileChangedEvent</code>.</div></li>
+        <li><div><strong>FileAnalyzer</strong> roda num pool de threads próprio. Lê o arquivo uma vez em blocos de 64 KB: o mesmo laço alimenta o SHA-256 e a contagem de bytes da entropia. Se o hash não mudou, para ali. Se mudou, publica <code>FileAnalyzedEvent</code> com a entropia nova e a anterior.</div></li>
+        <li><div><strong>RansomwareDetector</strong> guarda os eventos dos últimos 10 segundos e avalia os quatro sinais a cada evento novo.</div></li>
+        <li><div><strong>AlertListener</strong> loga o alerta e grava uma linha JSON em <code>alerts.log</code>. Não toca em arquivo nenhum: mexer nos dados do usuário sem confirmação está fora do escopo.</div></li>
+      </ol>
+      <div class="prose">
+        <p class="muted">Por que assíncrono: se a thread que ouve o sistema de arquivos parasse para hashear um arquivo de 2 GB, os eventos seguintes se acumulariam e o sistema operacional descartaria parte deles (<code>OVERFLOW</code>). Quando a fila do pool enche, a política <code>CallerRunsPolicy</code> faz a thread de debounce esperar, o que aplica backpressure em vez de perder eventos.</p>
+      </div>
+    </section>
+
+    <section id="entropia">
+      <span class="eyebrow">O sinal mais forte</span>
+      <h2>Entropia de Shannon: quão imprevisível é cada byte</h2>
+      <div class="prose">
+        <p>Conte quantas vezes cada um dos 256 valores de byte aparece no arquivo e transforme em probabilidades. A entropia diz quantos bits de informação, em média, cada byte carrega:</p>
+      </div>
+      <div class="formula">H = − Σ p(x) · log₂ p(x)      para x = 0 … 255     →   0 ≤ H ≤ 8 bits/byte</div>
+      <div class="prose">
+        <p>Um arquivo só com a letra <code>a</code> tem H = 0: nenhuma surpresa. Texto em português fica perto de 4,5 porque poucas letras dominam. Dado cifrado usa todos os 256 valores quase por igual e chega a 7,99. O FileWatch calcula H sobre os primeiros 256 KB de cada arquivo, o que basta para distinguir e mantém o custo baixo em arquivos grandes.</p>
+      </div>
+
+      <div class="bench" id="entropy-bench">
+        <div class="bench-head">
+          <h3>Bancada de entropia</h3>
+          <span class="muted" style="font-size:.85rem">Mesmo cálculo do <code>EntropyCalculator.java</code>, rodando no seu navegador</span>
+        </div>
+        <div class="chips" role="group" aria-label="Amostras">
+          <button class="chip" type="button" data-sample="text" aria-pressed="true">Texto em português</button>
+          <button class="chip" type="button" data-sample="repeat">Um byte repetido</button>
+          <button class="chip" type="button" data-sample="base64">Base64</button>
+          <button class="chip" type="button" data-sample="random">16 KB aleatórios (como o simulador)</button>
+        </div>
+        <label for="entropy-input" class="muted" style="font-size:.85rem">Edite o texto à vontade. A conta é feita sobre os bytes UTF-8.</label>
+        <textarea id="entropy-input" spellcheck="false"></textarea>
+        <div class="readout">
+          <div><span class="k">Entropia</span><span class="v" id="e-value">0,00</span></div>
+          <div><span class="k">Bytes</span><span class="v" id="e-bytes">0</span></div>
+          <div><span class="k">Valores distintos</span><span class="v" id="e-distinct">0</span></div>
+          <div><span class="k">Veredito S2</span><span class="v" id="e-verdict" style="font-size:1.1rem">—</span></div>
+        </div>
+        <div>
+          <div class="gauge" aria-hidden="true"><div class="fill" id="e-fill"></div><div class="mark" title="entropy-absolute-min = 7.5"></div></div>
+          <div class="gauge-scale"><span>0</span><span>2</span><span>4</span><span>6</span><span>7,5 ▲ limiar</span><span>8</span></div>
+        </div>
+        <canvas class="hist" id="e-hist" aria-label="Histograma de frequência dos 256 valores de byte"></canvas>
+        <p class="muted" style="font-size:.85rem">Histograma: um traço por valor de byte (0 a 255), altura proporcional à frequência. Texto concentra tudo na faixa ASCII; bytes aleatórios espalham uma camada uniforme por todo o eixo.</p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Tipo de conteúdo</th><th>Entropia típica</th><th>O que isso significa para o detector</th></tr></thead>
+          <tbody>
+            <tr><td>Arquivo de zeros, logs repetitivos</td><td class="num">0 – 2</td><td>Muito previsível.</td></tr>
+            <tr><td>Texto, código-fonte, CSV, JSON</td><td class="num">4 – 5,5</td><td>O caso típico de documento editável.</td></tr>
+            <tr><td>Executáveis, PDFs sem compressão</td><td class="num">5 – 6,5</td><td>Estruturas variadas, mas longe do máximo.</td></tr>
+            <tr><td>ZIP, JPEG, MP4, DOCX (é um zip)</td><td class="num">7,5 – 7,99</td><td>Já comprimidos. Alta entropia sozinha não prova nada.</td></tr>
+            <tr><td>Dados cifrados (AES, ChaCha20)</td><td class="num">≈ 7,99</td><td>Indistinguível de aleatório.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="prose">
+        <p>Por isso o sinal S2 exige duas condições ao mesmo tempo: entropia nova ≥ 7,5 <strong>e</strong> subida de pelo menos 2,0 em relação ao baseline. Um JPEG que continua JPEG não dispara, e um relatório <code>.txt</code> que virou ruído dispara.</p>
+      </div>
+    </section>
+
+    <section id="baseline">
+      <span class="eyebrow">Memória do monitor</span>
+      <h2>Baseline: saber como cada arquivo era antes</h2>
+      <div class="two">
+        <div class="card">
+          <h3>O que fica guardado</h3>
+          <p>Para cada arquivo: caminho, tamanho, data de modificação, SHA-256 e entropia. Tudo em <code>baseline.json</code>, fora do sandbox, salvo de forma atômica: escreve num temporário e faz <em>move</em>. Se o arquivo estiver corrompido, o monitor começa vazio e registra o erro, sem cair.</p>
+        </div>
+        <div class="card">
+          <h3>Varredura incremental</h3>
+          <p>No start, arquivo com mesmo tamanho e mesma data do baseline é <em>cache hit</em> e não é re-hasheado. O log mostra <code>Varredura inicial: 43 arquivos, 43 cache hits…</code>. Só o que mudou com o monitor desligado é lido de novo.</p>
+        </div>
+        <div class="card">
+          <h3>A primeira execução não alerta</h3>
+          <p>Sem baseline no disco, todo arquivo seria “novo” e o S1 dispararia na hora. Então a primeira varredura só constrói o baseline, sem alimentar o detector.</p>
+        </div>
+        <div class="card">
+          <h3>Por que SHA-256</h3>
+          <p>A data de modificação muda sem o conteúdo mudar (um <code>touch</code>, um antivírus, uma sincronização). O hash confirma se os bytes mudaram de fato. Isso também vira a base para uma consulta de reputação de hash no futuro.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="detector">
+      <span class="eyebrow">A decisão</span>
+      <h2>Quatro sinais numa janela de 10 segundos</h2>
+      <div class="signals">
+        <div class="signal"><span class="code">S1 · mass-modification-threshold = 30</span><h3>Modificação em massa</h3><p>30 ou mais arquivos distintos com conteúdo alterado na janela. Criação e remoção também contam.</p></div>
+        <div class="signal"><span class="code">S2 · entropy-spike-count = 10</span><h3>Salto de entropia</h3><p>10 ou mais arquivos que foram para ≥ 7,5 bits/byte subindo pelo menos 2,0.</p></div>
+        <div class="signal"><span class="code">S3 · suspicious-extensions</span><h3>Extensão suspeita</h3><p>Qualquer arquivo criado ou renomeado para <code>.locked</code>, <code>.encrypted</code>, <code>.crypt</code> ou <code>.enc</code>.</p></div>
+        <div class="signal"><span class="code">S4 · ransom-note-patterns</span><h3>Nota de resgate</h3><p>Nomes que casam com <code>readme.*decrypt</code>, <code>how.*to.*decrypt</code> ou <code>restore.*files</code>.</p></div>
+      </div>
+      <div class="prose">
+        <p>Um sinal sozinho gera <code>WARNING</code>. Dois ou mais sinais diferentes geram <code>HIGH</code>. Depois de um <code>HIGH</code>, os alertas ficam silenciados por 30 segundos, e um <code>WARNING</code> igual ao anterior também, senão cada evento dentro da janela repetiria o mesmo aviso. A combinação é o que reduz falso positivo: copiar 60 fotos dispara S1, mas não S2 (não havia entropia anterior para subir).</p>
+      </div>
+
+      <div class="bench" id="detector-bench">
+        <div class="bench-head">
+          <h3>Bancada do detector</h3>
+          <span class="muted" style="font-size:.85rem">Reimplementação fiel do <code>RansomwareDetector.evaluate()</code> sobre eventos sintéticos</span>
+        </div>
+        <div class="chips" role="group" aria-label="Cenários">
+          <button class="chip" type="button" data-scenario="ransom" aria-pressed="true">Simulador de ransomware</button>
+          <button class="chip" type="button" data-scenario="normal">Editar documentos</button>
+          <button class="chip" type="button" data-scenario="photos">Copiar 60 fotos</button>
+          <button class="chip" type="button" data-scenario="gzip">gzip em 40 arquivos</button>
+          <button class="chip" type="button" data-scenario="slow">Ransomware lento</button>
+        </div>
+        <p class="muted" id="scenario-desc" style="font-size:.9rem"></p>
+        <div class="controls">
+          <label for="th-mass">S1 limiar <input type="range" id="th-mass" min="5" max="80" value="30"><output id="th-mass-out" for="th-mass">30</output></label>
+          <label for="th-spike">S2 limiar <input type="range" id="th-spike" min="2" max="40" value="10"><output id="th-spike-out" for="th-spike">10</output></label>
+          <label for="th-window">Janela (s) <input type="range" id="th-window" min="2" max="60" value="10"><output id="th-window-out" for="th-window">10</output></label>
+        </div>
+        <div class="strip" id="strip"></div>
+        <div class="legend">
+          <span style="--c: var(--hist)">criado</span>
+          <span style="--c: var(--accent)">modificado</span>
+          <span style="--c: var(--muted)">removido</span>
+          <span style="--c: var(--high)">linha vertical = alerta emitido</span>
+        </div>
+        <div class="alerts" id="alerts" aria-live="polite"></div>
+        <p class="verdict" id="verdict"></p>
+      </div>
+    </section>
+
+    <section id="simular">
+      <span class="eyebrow">Simular passo a passo</span>
+      <h2>Anatomia do ataque simulado</h2>
+      <div class="prose">
+        <p>O <code>RansomwareSimulator</code> imita o que um ransomware faz com os arquivos, sem criptografar nada: ele só mexe em 40 relatórios descartáveis que ele mesmo cria. Cada etapa deixa um rastro diferente, e é isso que o detector mede. Aperte <em>Reproduzir</em> para ver a ordem dos acontecimentos e o que o monitor registra em cada momento.</p>
+      </div>
+
+      <div class="bench" id="replay-bench">
+        <div class="bench-head">
+          <h3>Linha do tempo de <code>lab attack</code></h3>
+          <button class="btn primary" type="button" id="replay-btn">▶ Reproduzir</button>
+        </div>
+        <div class="anatomy" id="anatomy">
+          <div class="stage" data-step="0">
+            <span class="n">t = 0 s · ETAPA 1</span>
+            <h4>Cria 40 vítimas</h4>
+            <span class="fname">relatorio-001.txt … relatorio-040.txt</span>
+            <div class="ebar" title="entropia ≈ 4,6"><i style="width:57%"></i></div>
+            <p>Texto comum, 16 KB cada, entropia ≈ 4,6.</p>
+            <div class="sigs"><span class="sig">S1 (criação)</span></div>
+          </div>
+          <div class="stage" data-step="1">
+            <span class="n">t = 0 → 5 s · ETAPA 2</span>
+            <h4>Espera o baseline</h4>
+            <span class="fname">baseline ← 40 entradas</span>
+            <div class="ebar"><i style="width:57%"></i></div>
+            <p>O monitor registra hash e entropia “de antes”.</p>
+            <div class="sigs"></div>
+          </div>
+          <div class="stage" data-step="2">
+            <span class="n">t ≈ 5 s · ETAPA 3</span>
+            <h4>Sobrescreve com ruído</h4>
+            <span class="fname">relatorio-001.txt ⟶ bytes aleatórios</span>
+            <div class="ebar" title="entropia ≈ 7,99"><i class="hot" style="width:99.8%"></i></div>
+            <p>Mesmo nome, conteúdo indistinguível de dado cifrado.</p>
+            <div class="sigs"><span class="sig">S1</span><span class="sig">S2</span></div>
+          </div>
+          <div class="stage" data-step="3">
+            <span class="n">t ≈ 7 s · ETAPA 4</span>
+            <h4>Renomeia</h4>
+            <span class="fname">relatorio-001.txt.encrypted</span>
+            <div class="ebar"><i class="hot" style="width:99.8%"></i></div>
+            <p>Chega como DELETED + CREATED com extensão suspeita.</p>
+            <div class="sigs"><span class="sig">S3</span></div>
+          </div>
+          <div class="stage" data-step="4">
+            <span class="n">t ≈ 8 s · ETAPA 5</span>
+            <h4>Deixa a “nota”</h4>
+            <span class="fname">README_DECRYPT.txt</span>
+            <div class="ebar"><i style="width:60%"></i></div>
+            <p>Texto fake. Não há chave nem pagamento.</p>
+            <div class="sigs"><span class="sig">S4</span></div>
+          </div>
+        </div>
+        <div class="term">
+          <div class="term-bar"><span>o que aparece no terminal do monitor</span></div>
+          <pre class="replay-log" id="replay-log" aria-live="polite"></pre>
+        </div>
+        <p class="muted" style="font-size:.85rem">S3 e S4 acontecem, mas não aparecem no alerta: o <code>HIGH</code> já saiu na etapa 3 e o cooldown de 30 s silencia os seguintes. É o mesmo motivo de o <code>lab demo</code> listar só S1 e S2.</p>
+      </div>
+
+      <h3>Roteiro com dois terminais</h3>
+      <ol class="steps">
+        <li><div><strong>Terminal 1:</strong> <code>lab reset</code> para começar sem baseline e sem alertas, depois <code>lab monitor</code>. Espere a linha <code>Varredura inicial (criando baseline)</code>.</div></li>
+        <li><div><strong>Terminal 2:</strong> <code>lab attack</code>. O simulador valida o sandbox, mostra a pasta da execução e percorre as cinco etapas acima.</div></li>
+        <li><div><strong>Terminal 1:</strong> aparecem o <code>[WARNING]</code> (só S1) e, segundos depois, o <code>[HIGH]</code> (S1 + S2). Cada alerta também vira uma linha JSON em <code>alerts.log</code>.</div></li>
+        <li><div><strong>No fim:</strong> Ctrl+C no monitor (o baseline é salvo) e <code>lab clean</code> para apagar o que o simulador gerou.</div></li>
+      </ol>
+      <div class="cmds">
+        <div class="term">
+          <div class="term-bar"><span>Windows</span></div>
+          <pre><span class="t-dim"># terminal 1</span>
+.\lab.cmd reset
+.\lab.cmd monitor
+<span class="t-dim"># terminal 2</span>
+.\lab.cmd attack</pre>
+        </div>
+        <div class="term">
+          <div class="term-bar"><span>Linux · macOS · Git Bash</span></div>
+          <pre><span class="t-dim"># terminal 1</span>
+./lab.sh reset
+./lab.sh monitor
+<span class="t-dim"># terminal 2</span>
+./lab.sh attack</pre>
+        </div>
+      </div>
+
+      <h3>Experimentos à mão</h3>
+      <div class="prose"><p>Com o monitor rodando, crie e edite arquivos dentro de <code>sandbox/</code> e compare com o resultado esperado:</p></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Experimento</th><th>Resultado esperado</th></tr></thead>
+          <tbody>
+            <tr><td>Criar e editar 1 ou 2 arquivos <code>.txt</code></td><td>Nenhum alerta. Uso normal fica longe dos limiares.</td></tr>
+            <tr><td>Criar <code>sandbox/teste.locked</code></td><td><span class="pill WARNING">WARNING</span> com S3.</td></tr>
+            <tr><td>Criar <code>sandbox/how_to_decrypt.txt</code></td><td><span class="pill WARNING">WARNING</span> com S4.</td></tr>
+            <tr><td>Os dois acima em menos de 10 s</td><td><span class="pill HIGH">HIGH</span> com S3 + S4.</td></tr>
+            <tr><td>Repetir logo depois de um <code>HIGH</code></td><td>Silêncio: cooldown de 30 s.</td></tr>
+            <tr><td>Parar o monitor e subir de novo</td><td>O log mostra <em>cache hits</em>: arquivos sem mudança não são re-hasheados.</td></tr>
+            <tr><td>Apontar <code>--filewatch.monitored-path</code> para a sua home</td><td>O monitor recusa a pasta e não inicia.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="prose">
+        <p class="muted">Quer mudar os limiares? Eles ficam em <code>src/main/resources/application.yml</code> e também aceitam linha de comando, por exemplo <code>--filewatch.detection.window-seconds=30</code>. A bancada do detector acima mostra o efeito de cada ajuste antes de você rodar.</p>
+      </div>
+    </section>
+
+    <section id="watcher">
+      <span class="eyebrow">Detalhes que custam caro</span>
+      <h2>Armadilhas do WatchService</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Problema</th><th>Como o FileWatch lida</th></tr></thead>
+          <tbody>
+            <tr><td>Não é recursivo: só avisa sobre a pasta registrada.</td><td>Registra a árvore inteira no start e cada subpasta nova assim que ela aparece.</td></tr>
+            <tr><td>Uma gravação gera vários <code>ENTRY_MODIFY</code> seguidos.</td><td>Debounce de 300 ms por arquivo: só o último evento da rajada segue adiante.</td></tr>
+            <tr><td><code>OVERFLOW</code>: o SO descartou eventos porque a fila encheu.</td><td>Re-varre o diretório afetado. Remoções perdidas nesse caso só são reconciliadas no próximo start.</td></tr>
+            <tr><td>Renomear chega como <code>DELETE</code> + <code>CREATE</code>.</td><td>O arquivo renomeado não herda a entropia anterior. Por isso o S2 depende de ver a sobrescrita antes da renomeação.</td></tr>
+            <tr><td>No Windows, o arquivo pode estar travado por quem está escrevendo.</td><td>A leitura falha em silêncio (nível DEBUG) e o próximo <code>MODIFY</code> tenta de novo.</td></tr>
+            <tr><td>Symlinks e junctions podem apontar para fora.</td><td>A varredura não segue links e todo caminho passa pelo <code>PathGuard</code>, que compara o caminho canônico.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="seguranca">
+      <span class="eyebrow">Segurança do laboratório</span>
+      <h2>Seguro de rodar na sua máquina, por construção</h2>
+      <div class="prose">
+        <p>Um projeto que simula ransomware precisa provar que não é ransomware. As garantias abaixo estão no código e a maioria tem teste automatizado: o laboratório só toca na pasta do projeto. Mesmo assim, a recomendação para qualquer teste com simulação de malware é usar um <a href="#ambiente">ambiente controlado</a>.</p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Camada</th><th>O que garante</th><th>Onde</th></tr></thead>
+          <tbody>
+            <tr><td>Marcador <code>.filewatch-sandbox</code></td><td>Monitor e simulador só aceitam uma pasta que tenha esse arquivo. Um caminho digitado errado é recusado na inicialização.</td><td><code>PathGuard</code>, simulador</td></tr>
+            <tr><td>Recusas fixas</td><td>Raiz de disco, pasta home e qualquer pasta que contenha a home.</td><td><code>PathGuardTest</code></td></tr>
+            <tr><td>Caminho canônico</td><td><code>toRealPath()</code> resolve <code>..</code>, symlinks e junctions do Windows antes de comparar com o sandbox.</td><td><code>PathGuard</code>, simulador</td></tr>
+            <tr><td>Monitor só lê</td><td>Nunca executa, move ou apaga arquivos observados. Escreve só <code>baseline.json</code> e <code>alerts.log</code>.</td><td>todo o pacote <code>analysis</code></td></tr>
+            <tr><td>Simulador em dry run por padrão</td><td>Sem <code>--confirm</code> ele só imprime o plano.</td><td><code>RansomwareSimulator</code></td></tr>
+            <tr><td>Pasta nova por execução</td><td>Escreve só em <code>sandbox/victims/run-&lt;timestamp&gt;/</code>, criada naquele momento, e só nos arquivos que ele mesmo criou (<code>CREATE_NEW</code>, sem seguir links, sem substituir destino).</td><td><code>guarded()</code></td></tr>
+            <tr><td>Criptografia nenhuma</td><td>Sobrescreve arquivos descartáveis com bytes de <code>SecureRandom</code>. Não existe chave nem “decifrar”.</td><td>simulador</td></tr>
+            <tr><td>Limpeza conservadora</td><td><code>--clean</code> só apaga pastas <code>run-&lt;timestamp&gt;</code> com exclusivamente os nomes que o simulador gera. Qualquer arquivo estranho preserva a pasta inteira.</td><td><code>ownFilesOnly()</code></td></tr>
+            <tr><td>Sem privilégios nem rede</td><td>Usuário comum, nenhum socket, nenhum processo filho. A JVM do monitor é limitada a 256 MB.</td><td><code>lab.cmd</code> / <code>lab.sh</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="prose">
+        <p class="muted">Uma dessas camadas veio de um teste de ataque contra o próprio simulador: se <code>sandbox/victims</code> fosse uma junction apontando para outra pasta, a versão anterior criaria a pasta da execução do outro lado. Agora ele compara o caminho canônico com o caminho esperado e recusa antes de escrever.</p>
+      </div>
+    </section>
+
+    <section id="ambiente">
+      <span class="eyebrow">Ambiente controlado</span>
+      <h2>Seguro na sua máquina, melhor ainda isolado</h2>
+      <div class="prose">
+        <p>As proteções do código confinam tudo a <code>./sandbox</code>. Um ambiente isolado acrescenta uma garantia que não depende do código: se algo der errado, você descarta o ambiente e pronto. Também é o lugar certo para calibrar limiares sem medo.</p>
+      </div>
+      <div class="two">
+        <div class="card"><h3>VM com snapshot</h3><p>VirtualBox, Hyper-V, VMware ou UTM. Instale Java 17 e Maven, clone o repositório e <strong>tire um snapshot</strong>. Rode <code>lab demo</code>, ajuste o que quiser e restaure o snapshot no fim. É o isolamento mais completo.</p></div>
+        <div class="card"><h3>Windows Sandbox</h3><p>VM descartável nativa do Windows Pro e Enterprise. Tudo que acontece lá dentro some quando você fecha a janela.</p></div>
+        <div class="card"><h3>Contêiner Docker</h3><p>Uma imagem <code>eclipse-temurin:17</code> com Maven, clonando o repositório dentro do contêiner. Rápido e descartável no Linux e no macOS.</p></div>
+        <div class="card"><h3>Pasta do projeto</h3><p>O teste básico. Sem VM, as camadas da seção anterior garantem que monitor e simulador só tocam em <code>./sandbox</code>, <code>baseline.json</code> e <code>alerts.log</code>.</p></div>
+      </div>
+      <ol class="steps">
+        <li><div>Prepare o ambiente e tire o snapshot.</div></li>
+        <li><div>Rode <code>lab demo</code> e confira o <code>PASSOU</code>.</div></li>
+        <li><div>Experimente: mude limiares, rode o roteiro manual, reproduza de verdade os cenários da bancada.</div></li>
+        <li><div>Restaure o snapshot (ou rode <code>lab reset</code>) e repita.</div></li>
+      </ol>
+    </section>
+
+    <section id="limites">
+      <span class="eyebrow">Limitações</span>
+      <h2>O que este projeto não resolve</h2>
+      <div class="two">
+        <div class="card"><h3>É reativo</h3><p>Em espaço de usuário, o alerta sai durante ou depois do início do dano. É detecção precoce, não prevenção. Bloquear exigiria um minifiltro de kernel, como fazem os EDRs.</p></div>
+        <div class="card"><h3>Evasão por lentidão</h3><p>Um ataque que cifra um arquivo a cada 15 segundos nunca enche a janela de 10 s. Veja o cenário “Ransomware lento” na bancada do detector.</p></div>
+        <div class="card"><h3>Falsos positivos</h3><p>Copiar muitas fotos ou compactar em lote dispara S1. Só vira <code>HIGH</code> com um segundo sinal, mas uma whitelist de processos ou pastas ajudaria.</p></div>
+        <div class="card"><h3>Eventos perdidos</h3><p>Sem hook de kernel, um <code>OVERFLOW</code> pode esconder remoções até o próximo start.</p></div>
+      </div>
+    </section>
+
+    <section id="estudar">
+      <span class="eyebrow">Para estudar</span>
+      <h2>Exercícios, glossário e leituras</h2>
+      <h3>Exercícios sugeridos</h3>
+      <ol class="steps">
+        <li><div>Rode <code>lab monitor</code> e, em outro terminal, crie e edite arquivos em <code>sandbox/</code> à mão. Compare os tempos do log com o debounce de 300 ms.</div></li>
+        <li><div>Compacte 40 arquivos de <code>sandbox/</code> um a um e observe o <code>WARNING</code> de S1 sem S2. Depois tente um limiar de S1 que evite o aviso sem deixar o simulador passar.</div></li>
+        <li><div>Implemente um <em>canary file</em>: um arquivo isca em <code>sandbox/</code> que nenhum programa legítimo toca. Qualquer alteração nele vira um quinto sinal.</div></li>
+        <li><div>Adicione ao simulador um modo lento e meça qual combinação de janela e limiar ainda o pega, e a que custo de falsos positivos.</div></li>
+        <li><div>Troque a entropia pelo teste qui-quadrado sobre o histograma de bytes, que separa melhor dado comprimido de dado cifrado. Compare os resultados.</div></li>
+      </ol>
+
+      <h3>Glossário</h3>
+      <dl class="gloss">
+        <dt>Baseline</dt><dd>Fotografia do estado conhecido de cada arquivo, usada como referência para decidir se algo mudou.</dd>
+        <dt>Debounce</dt><dd>Esperar um intervalo sem novos eventos antes de agir, para tratar uma rajada como um evento só.</dd>
+        <dt>Backpressure</dt><dd>Fazer o produtor desacelerar quando o consumidor não dá conta, em vez de descartar trabalho.</dd>
+        <dt>Entropia</dt><dd>Medida de imprevisibilidade de uma sequência de símbolos, em bits por símbolo.</dd>
+        <dt>Janela deslizante</dt><dd>Conjunto dos eventos mais recentes dentro de um intervalo fixo que anda junto com o relógio.</dd>
+        <dt>Cooldown</dt><dd>Período em que alertas repetidos são silenciados depois de um alerta.</dd>
+        <dt>Path traversal</dt><dd>Uso de <code>..</code> ou de links para escapar de uma pasta permitida (CWE-22, CWE-59).</dd>
+        <dt>Junction</dt><dd>Tipo de link de diretório do NTFS. O Java não o reporta como symlink, por isso a comparação por caminho canônico.</dd>
+        <dt>EDR</dt><dd>Endpoint Detection and Response: ferramenta que monitora processos e arquivos no nível do SO e pode bloquear ações.</dd>
+        <dt>Backup 3-2-1</dt><dd>Três cópias, em dois tipos de mídia, uma fora do local (e de preferência offline ou imutável).</dd>
+      </dl>
+
+      <h3>Leituras</h3>
+      <p class="muted" style="font-size:.9rem">Referências consultadas em 2026. Links e recomendações de órgãos como CISA e NIST são atualizados com o tempo.</p>
+      <ul class="refs">
+        <li><a href="https://attack.mitre.org/techniques/T1486/">MITRE ATT&amp;CK T1486: Data Encrypted for Impact</a><span class="src">Como ransomware real se comporta e como é detectado, com exemplos de grupos.</span></li>
+        <li><a href="https://www.cisa.gov/stopransomware/ransomware-guide">CISA #StopRansomware Guide</a><span class="src">Guia prático de prevenção e resposta, incluindo backup offline.</span></li>
+        <li><a href="https://csrc.nist.gov/pubs/ir/8374/final">NIST IR 8374: Ransomware Risk Management</a><span class="src">Perfil do NIST Cybersecurity Framework específico para ransomware.</span></li>
+        <li><a href="https://www.nomoreransom.org/">No More Ransom</a><span class="src">Projeto da Europol com ferramentas de recuperação para famílias com falhas de criptografia.</span></li>
+        <li><span>Scaife, Carter, Traynor, Butler. <em>CryptoLock (and Drop It): Stopping Ransomware Attacks on User Data.</em> IEEE ICDCS 2016.</span><span class="src">Detecção por entropia, mudança de tipo de arquivo e similaridade. A inspiração mais direta deste projeto.</span></li>
+        <li><span>Kharraz et al. <em>UNVEIL: A Large-Scale, Automated Approach to Detecting Ransomware.</em> USENIX Security 2016.</span><span class="src">Análise de padrões de I/O em sistema de arquivos.</span></li>
+        <li><span>Continella et al. <em>ShieldFS: A Self-healing, Ransomware-aware Filesystem.</em> ACSAC 2016.</span><span class="src">Detecção no nível do driver de sistema de arquivos, com restauração automática.</span></li>
+        <li><a href="https://people.math.harvard.edu/~ctm/home/text/others/shannon/entropy/entropy.pdf">Shannon. <em>A Mathematical Theory of Communication.</em> 1948.</a><span class="src">O artigo que define entropia da informação.</span></li>
+        <li><a href="https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/nio/file/WatchService.html">Javadoc: java.nio.file.WatchService</a><span class="src">Semântica de eventos, OVERFLOW e registro de diretórios.</span></li>
+        <li><a href="https://docs.spring.io/spring-framework/reference/core/beans/context-introduction.html#context-functionality-events">Spring Framework: eventos de aplicação</a><span class="src"><code>ApplicationEventPublisher</code>, <code>@EventListener</code> e <code>@Async</code>.</span></li>
+        <li><a href="https://cwe.mitre.org/data/definitions/22.html">CWE-22 Path Traversal</a> · <a href="https://cwe.mitre.org/data/definitions/59.html">CWE-59 Link Following</a><span class="src">As classes de vulnerabilidade que o <code>PathGuard</code> e o simulador evitam.</span></li>
+      </ul>
+    </section>
+  </main>
+</div>
+<footer>FileWatch · pesquisa e estudo de 2026 · projeto em Java 17 + Spring Boot 3.5, por Gabriel Moreno Serignolli · licença MIT. O código, a especificação (<code>SPEC-filewatch.md</code>) e o laboratório (<code>lab.cmd</code> / <code>lab.sh</code>) ficam no <a href="https://github.com/serignolli/filewatch">repositório no GitHub</a>.</footer>
+
+<script>
+(function () {
+  "use strict";
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const fmt = (n, d) => n.toLocaleString("pt-BR", { minimumFractionDigits: d, maximumFractionDigits: d });
+
+  // Botões de copiar
+  document.querySelectorAll(".copy").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const text = btn.dataset.copy;
+      const done = () => { btn.textContent = "Copiado"; setTimeout(() => (btn.textContent = "Copiar"), 1500); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, () => selectPre(btn));
+      } else selectPre(btn);
+    });
+  });
+  function selectPre(btn) {
+    const pre = btn.closest(".term").querySelector("pre");
+    const range = document.createRange(); range.selectNodeContents(pre);
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range);
+    btn.textContent = "Selecionado";
+  }
+
+  // ---------- Bancada de entropia ----------
+  const samples = {
+    text: "Relatório trimestral de vendas. O faturamento da região sul cresceu doze por cento em relação ao mesmo período do ano passado, puxado principalmente pelas lojas de Curitiba e Porto Alegre. A meta para o próximo trimestre é manter o ritmo e reduzir o prazo médio de entrega.",
+    repeat: "a".repeat(400),
+    base64: "",
+    random: null
+  };
+  let randomBytes = null;
+  const input = document.getElementById("entropy-input");
+  const hist = document.getElementById("e-hist");
+
+  function entropyOf(bytes) {
+    const counts = new Array(256).fill(0);
+    for (const b of bytes) counts[b]++;
+    let h = 0;
+    for (const c of counts) if (c > 0) { const p = c / bytes.length; h -= p * Math.log2(p); }
+    return { h: bytes.length ? h : 0, counts };
+  }
+
+  function drawHist(counts) {
+    const dpr = window.devicePixelRatio || 1;
+    const w = hist.clientWidth, h = hist.clientHeight;
+    hist.width = Math.round(w * dpr); hist.height = Math.round(h * dpr);
+    const g = hist.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, w, h);
+    const max = Math.max(1, ...counts);
+    const pad = 6, bw = (w - pad * 2) / 256;
+    g.fillStyle = css("--line");
+    g.fillRect(pad, h - pad - 0.5, w - pad * 2, 1);
+    g.fillStyle = css("--hist");
+    counts.forEach((c, i) => {
+      if (!c) return;
+      const bh = Math.max(1, (c / max) * (h - pad * 2));
+      g.fillRect(pad + i * bw, h - pad - bh, Math.max(1, bw - 0.4), bh);
+    });
+    g.fillStyle = css("--muted"); g.font = "10px " + css("--f-mono");
+    g.fillText("0x00", pad + 2, 12); g.textAlign = "right"; g.fillText("0xFF", w - pad - 2, 12);
+  }
+
+  function updateEntropy() {
+    const bytes = randomBytes || new TextEncoder().encode(input.value);
+    const { h, counts } = entropyOf(bytes);
+    document.getElementById("e-value").textContent = fmt(h, 2);
+    document.getElementById("e-bytes").textContent = bytes.length.toLocaleString("pt-BR");
+    document.getElementById("e-distinct").textContent = counts.filter(Boolean).length;
+    const fill = document.getElementById("e-fill");
+    fill.style.width = (h / 8 * 100) + "%";
+    fill.classList.toggle("hot", h >= 7.5);
+    const verdict = document.getElementById("e-verdict");
+    if (h >= 7.5) { verdict.textContent = "acima de 7,5: candidato a salto"; verdict.style.color = css("--high"); }
+    else { verdict.textContent = "abaixo do limiar"; verdict.style.color = css("--ok"); }
+    drawHist(counts);
+  }
+
+  function base64Sample() {
+    const raw = new Uint8Array(900); crypto.getRandomValues(raw);
+    let s = ""; raw.forEach((b) => (s += String.fromCharCode(b)));
+    return btoa(s).replace(/(.{76})/g, "$1\n");
+  }
+
+  function loadSample(name) {
+    document.querySelectorAll("[data-sample]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.sample === name)));
+    if (name === "random") {
+      randomBytes = new Uint8Array(16384); crypto.getRandomValues(randomBytes);
+      let preview = "";
+      for (let i = 0; i < 480; i++) preview += randomBytes[i].toString(16).padStart(2, "0") + (i % 24 === 23 ? "\n" : " ");
+      input.value = preview + "… (16 384 bytes de SecureRandom; a conta usa os bytes, não este texto hexadecimal)";
+      input.readOnly = true;
+    } else {
+      randomBytes = null; input.readOnly = false;
+      input.value = name === "base64" ? base64Sample() : samples[name];
+    }
+    updateEntropy();
+  }
+  document.querySelectorAll("[data-sample]").forEach((b) => b.addEventListener("click", () => loadSample(b.dataset.sample)));
+  input.addEventListener("input", () => { if (!randomBytes) updateEntropy(); });
+
+  // ---------- Bancada do detector ----------
+  // Mesmas regras de RansomwareDetector.evaluate(): janela deslizante, S1–S4, WARNING/HIGH, cooldown.
+  const CFG = { entropyAbsoluteMin: 7.5, entropyDeltaMin: 2.0, cooldown: 30,
+    ext: [".locked", ".encrypted", ".crypt", ".enc"],
+    notes: [/readme.*decrypt/i, /how.*to.*decrypt/i, /restore.*files/i] };
+
+  function pad3(i) { return String(i).padStart(3, "0"); }
+  const scenarios = {
+    ransom: {
+      desc: "O que o RansomwareSimulator faz: cria 40 relatórios de texto, espera 5 s, sobrescreve todos com bytes aleatórios, renomeia para .encrypted e deixa README_DECRYPT.txt.",
+      build() {
+        const ev = [];
+        for (let i = 1; i <= 40; i++) ev.push({ t: 0.2 + i * 0.012, type: "CREATED", path: `relatorio-${pad3(i)}.txt`, ent: 4.6, prev: null });
+        for (let i = 1; i <= 40; i++) ev.push({ t: 5.4 + i * 0.02, type: "MODIFIED", path: `relatorio-${pad3(i)}.txt`, ent: 7.99, prev: 4.6 });
+        for (let i = 1; i <= 40; i++) {
+          ev.push({ t: 7.2 + i * 0.015, type: "DELETED", path: `relatorio-${pad3(i)}.txt`, ent: 0, prev: 7.99 });
+          ev.push({ t: 7.2 + i * 0.015 + 0.005, type: "CREATED", path: `relatorio-${pad3(i)}.txt.encrypted`, ent: 7.99, prev: null });
+        }
+        ev.push({ t: 8.0, type: "CREATED", path: "README_DECRYPT.txt", ent: 4.8, prev: null });
+        return ev;
+      }
+    },
+    normal: {
+      desc: "Uma pessoa trabalhando por dois minutos: salva seis documentos algumas vezes e cria uma planilha.",
+      build() {
+        const ev = [];
+        const docs = ["proposta.docx", "notas.txt", "orcamento.xlsx", "ata.txt", "roteiro.md", "contrato.pdf"];
+        let t = 3;
+        for (let r = 0; r < 3; r++) docs.forEach((d, i) => { t += 5 + (i % 3) * 2; ev.push({ t, type: "MODIFIED", path: d, ent: d.endsWith("x") ? 7.9 : 4.6, prev: d.endsWith("x") ? 7.9 : 4.5 }); });
+        ev.push({ t: 60, type: "CREATED", path: "gastos-setembro.xlsx", ent: 7.9, prev: null });
+        return ev.sort((a, b) => a.t - b.t);
+      }
+    },
+    photos: {
+      desc: "Copiar 60 JPEGs do celular para a pasta. Muitos arquivos de alta entropia aparecem de uma vez, mas nenhum subiu de entropia: eram novos.",
+      build() { const ev = []; for (let i = 1; i <= 60; i++) ev.push({ t: 1 + i * 0.08, type: "CREATED", path: `IMG_${2400 + i}.jpg`, ent: 7.96, prev: null }); return ev; }
+    },
+    gzip: {
+      desc: "gzip *.txt: cada arquivo vira um .gz novo e o original é removido. S1 conta criações e remoções, mas a entropia alta está em arquivos novos, sem valor anterior.",
+      build() {
+        const ev = [];
+        for (let i = 1; i <= 40; i++) {
+          ev.push({ t: 1 + i * 0.1, type: "CREATED", path: `log-${pad3(i)}.txt.gz`, ent: 7.92, prev: null });
+          ev.push({ t: 1 + i * 0.1 + 0.02, type: "DELETED", path: `log-${pad3(i)}.txt`, ent: 0, prev: 4.4 });
+        }
+        return ev;
+      }
+    },
+    slow: {
+      desc: "Um ataque paciente: sobrescreve um arquivo por vez, a cada 15 s, sem renomear nem deixar nota. Com janela de 10 s, nenhum limiar é atingido.",
+      build() { const ev = []; for (let i = 1; i <= 16; i++) ev.push({ t: i * 15, type: "MODIFIED", path: `contrato-${pad3(i)}.pdf`, ent: 7.99, prev: 5.8 }); return ev; }
+    }
+  };
+
+  function runDetector(events, mass, spikeCount, windowS) {
+    const win = [];
+    let lastHigh = null, lastWarn = null, lastWarnSig = "";
+    const out = [];
+    const endsWithExt = (p) => CFG.ext.some((e) => p.toLowerCase().endsWith(e));
+    const isNote = (p) => CFG.notes.some((r) => r.test(p));
+    for (const e of events) {
+      const now = e.t;
+      win.push(e);
+      while (win.length && win[0].t < now - windowS) win.shift();
+      const signals = [], reasons = [];
+      const changed = new Set(win.map((x) => x.path));
+      if (changed.size >= mass) { signals.push("S1"); reasons.push(`S1 modificação em massa: ${changed.size} arquivos em ${windowS}s (limiar ${mass})`); }
+      const spiked = new Set(win.filter((x) => x.type !== "DELETED" && x.prev !== null && x.ent >= CFG.entropyAbsoluteMin && x.ent - x.prev >= CFG.entropyDeltaMin).map((x) => x.path));
+      if (spiked.size >= spikeCount) { signals.push("S2"); reasons.push(`S2 salto de entropia: ${spiked.size} arquivos (limiar ${spikeCount})`); }
+      const bad = win.filter((x) => x.type !== "DELETED" && endsWithExt(x.path));
+      if (bad.length) { signals.push("S3"); reasons.push(`S3 extensão suspeita: ex.: ${bad[0].path}`); }
+      const notes = win.filter((x) => x.type !== "DELETED" && isNote(x.path));
+      if (notes.length) { signals.push("S4"); reasons.push(`S4 possível nota de resgate: ${notes[0].path}`); }
+      if (!signals.length) continue;
+      const sev = signals.length >= 2 ? "HIGH" : "WARNING";
+      const sig = signals.join(",");
+      const inHighCooldown = lastHigh !== null && now < lastHigh + CFG.cooldown;
+      const sameWarn = sev === "WARNING" && lastWarn !== null && now < lastWarn + CFG.cooldown && sig === lastWarnSig;
+      if (inHighCooldown || sameWarn) continue;
+      if (sev === "HIGH") lastHigh = now; else { lastWarn = now; lastWarnSig = sig; }
+      out.push({ t: now, sev, reasons });
+    }
+    return out;
+  }
+
+  const strip = document.getElementById("strip");
+  const alertsBox = document.getElementById("alerts");
+  const verdict = document.getElementById("verdict");
+  const sliders = ["th-mass", "th-spike", "th-window"].map((id) => document.getElementById(id));
+  let current = "ransom";
+
+  function esc(s) { return s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+
+  function renderDetector() {
+    sliders.forEach((s) => (document.getElementById(s.id + "-out").textContent = s.value));
+    const [mass, spike, windowS] = sliders.map((s) => Number(s.value));
+    const sc = scenarios[current];
+    document.getElementById("scenario-desc").textContent = sc.desc;
+    const events = sc.build();
+    const alerts = runDetector(events, mass, spike, windowS);
+
+    const tMax = Math.max(10, Math.ceil(events[events.length - 1].t + 1));
+    const W = 760, H = 96, L = 12, R = 12, top = 18, base = 70;
+    const x = (t) => L + (t / tMax) * (W - L - R);
+    const color = { CREATED: "var(--hist)", MODIFIED: "var(--accent)", DELETED: "var(--muted)" };
+    const row = { CREATED: 30, MODIFIED: 44, DELETED: 58 };
+    let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Linha do tempo dos eventos e alertas">`;
+    svg += `<line x1="${L}" x2="${W - R}" y1="${base + 6}" y2="${base + 6}" stroke="var(--line)"/>`;
+    const step = tMax <= 12 ? 1 : tMax <= 40 ? 5 : tMax <= 130 ? 15 : 30;
+    for (let t = 0; t <= tMax; t += step) svg += `<line x1="${x(t)}" x2="${x(t)}" y1="${base + 6}" y2="${base + 10}" stroke="var(--line)"/><text x="${x(t)}" y="${base + 22}" text-anchor="middle">${t}s</text>`;
+    alerts.forEach((a) => {
+      svg += `<line x1="${x(a.t)}" x2="${x(a.t)}" y1="${top - 6}" y2="${base + 6}" stroke="var(--high)" stroke-width="1.5" stroke-dasharray="${a.sev === "HIGH" ? "0" : "3 3"}"/>`;
+      svg += `<text x="${x(a.t) + 4}" y="${top - 2}" style="fill: var(--high)">${a.sev}</text>`;
+    });
+    events.forEach((e) => (svg += `<circle cx="${x(e.t).toFixed(1)}" cy="${row[e.type]}" r="2.6" fill="${color[e.type]}" opacity="0.85"/>`));
+    svg += `</svg>`;
+    strip.innerHTML = svg;
+
+    alertsBox.innerHTML = alerts.length
+      ? alerts.map((a) => `<div class="alert-row"><span class="t">${fmt(a.t, 2)}s</span><span class="pill ${a.sev}">${a.sev}</span><span class="reasons">${a.reasons.map(esc).join("<br>")}</span></div>`).join("")
+      : `<div class="alert-row"><span class="t">—</span><span class="pill MUTED">NENHUM</span><span class="reasons">Nenhum alerta emitido.</span></div>`;
+
+    const high = alerts.some((a) => a.sev === "HIGH");
+    const texts = {
+      ransom: high ? "Detectado. O WARNING sai quando o 30º arquivo é criado; o HIGH, na sobrescrita (S1 + S2). S3 e S4 caem no cooldown de 30 s do HIGH, por isso o lab demo mostra só S1 e S2." : "Com esses limiares o ataque passou. Baixe S1/S2 ou aumente a janela.",
+      normal: alerts.length ? "Com esses limiares até o uso normal alerta: falso positivo." : "Silêncio, como deveria. Trabalho humano não chega perto dos limiares.",
+      photos: high ? "HIGH num evento benigno: falso positivo grave." : "Só WARNING (S1). Sem entropia anterior não há salto, então não chega a HIGH.",
+      gzip: high ? "HIGH num evento benigno: falso positivo grave." : "Só WARNING (S1). É o falso positivo aceitável que a combinação de sinais deixa passar como aviso.",
+      slow: alerts.length ? "Pegou, mas veja o custo: com janela ou limiares assim, os cenários benignos também alertam?" : "Passou despercebido. Esta é a principal limitação de detecção por volume numa janela curta."
+    };
+    verdict.textContent = texts[current];
+  }
+
+  document.querySelectorAll("[data-scenario]").forEach((b) => b.addEventListener("click", () => {
+    current = b.dataset.scenario;
+    document.querySelectorAll("[data-scenario]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    renderDetector();
+  }));
+  sliders.forEach((s) => s.addEventListener("input", renderDetector));
+
+  // ---------- Linha do tempo do ataque simulado ----------
+  const anatomy = document.getElementById("anatomy");
+  const stages = Array.from(anatomy.querySelectorAll(".stage"));
+  const replayLog = document.getElementById("replay-log");
+  const replayBtn = document.getElementById("replay-btn");
+  // Linhas no formato do log real do monitor, encurtadas.
+  const logFor = [
+    [["t-dim", "INFO  Varredura inicial (criando baseline): 2 arquivos, 0 cache hits ..."], ["", "      40 arquivos criados em victims/run-…"]],
+    [["t-dim", "      baseline atualizado: entropia ≈ 4,6 nos 40 arquivos"]],
+    [["t-warn", "WARN  [WARNING] Suspeita de ransomware | S1 modificação em massa: 30 arquivos alterados em 10s (limiar 30)"],
+     ["t-high", "ERROR [HIGH] Suspeita de ransomware | S1 modificação em massa: 40 arquivos alterados em 10s; S2 salto de entropia: 10 arquivos foram para >= 7,5 bits/byte"]],
+    [["t-dim", "      (S3 extensão .encrypted: silenciado pelo cooldown de 30 s)"]],
+    [["t-dim", "      (S4 README_DECRYPT.txt: silenciado pelo cooldown de 30 s)"]]
+  ];
+  let replayTimer = null;
+  function showStep(i) {
+    stages.forEach((st, k) => { st.classList.toggle("active", k === i); st.classList.toggle("done", k < i); });
+    logFor[i].forEach(([cls, text]) => {
+      const span = document.createElement("span");
+      span.className = "line " + cls; span.textContent = text;
+      replayLog.appendChild(span);
+    });
+  }
+  replayBtn.addEventListener("click", () => {
+    clearTimeout(replayTimer);
+    replayLog.textContent = "";
+    stages.forEach((st) => st.classList.remove("active", "done"));
+    const reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) { logFor.forEach((_, i) => showStep(i)); stages.forEach((st) => st.classList.remove("active", "done")); return; }
+    anatomy.classList.add("playing");
+    replayBtn.textContent = "▶ Reproduzindo…";
+    let i = 0;
+    const tick = () => {
+      showStep(i++);
+      if (i < stages.length) { replayTimer = setTimeout(tick, 1400); return; }
+      replayTimer = setTimeout(() => {
+        anatomy.classList.remove("playing");
+        stages.forEach((st) => st.classList.remove("active", "done"));
+        replayBtn.textContent = "↻ Reproduzir de novo";
+      }, 1800);
+    };
+    tick();
+  });
+
+  loadSample("text");
+  renderDetector();
+  window.addEventListener("resize", () => updateEntropy());
+  if (window.matchMedia) window.matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => updateEntropy());
+})();
+</script>
+</body>
+</html>

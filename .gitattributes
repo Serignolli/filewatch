@@ -1,0 +1,8 @@
+* text=auto
+
+# scripts precisam do fim de linha da plataforma onde rodam
+*.sh   text eol=lf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+*.jar  binary

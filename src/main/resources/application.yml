@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: filewatch
+  main:
+    web-application-type: none
+
+filewatch:
+  monitored-path: ./sandbox            # ÚNICA pasta observada
+  require-sandbox-marker: true         # só aceita pasta com o arquivo .filewatch-sandbox
+  baseline-file: ./baseline.json
+  alerts-file: ./alerts.log            # um alerta por linha, em JSON
+  sampling-bytes: 262144               # 256 KB para o cálculo de entropia
+  debounce-millis: 300
+
+  detection:
+    window-seconds: 10
+    mass-modification-threshold: 30
+    entropy-spike-count: 10
+    entropy-absolute-min: 7.5
+    entropy-delta-min: 2.0
+    alert-cooldown-seconds: 30
+
+  suspicious-extensions: [".locked", ".encrypted", ".crypt", ".enc"]
+  ransom-note-patterns:
+    - "(?i)readme.*decrypt"
+    - "(?i)how.*to.*decrypt"
+    - "(?i)restore.*files"
+
+logging:
+  level:
+    com.serignolli.filewatch: INFO
+    # DEBUG mostra cada "cache hit" individualmente
+    # com.serignolli.filewatch.analysis: DEBUG

@@ -1,0 +1,21 @@
+target/
+.idea/
+*.iml
+.vscode/
+
+# estado local do monitor
+baseline.json
+baseline.json.tmp
+alerts.log
+
+# execuções do simulador
+sandbox/victims/run-*/
+
+# arquivos de IDE (Eclipse / VS Code Java)
+.classpath
+.project
+.settings/
+.factorypath
+
+# artefatos de ferramentas locais
+.playwright-mcp/
